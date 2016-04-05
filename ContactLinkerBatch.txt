@@ -1,0 +1,139 @@
+/**
+ *  Description: This batch will update Contact records, on the basis of email addresses
+ *    Author                   Date (mm-dd-yyyy)        Version             ChangeLog
+ *    Geeta Kushwaha           02-25-2016               1.0                 Initial draft 
+ *    Geeta Kushwaha           02-27-2016               1.1                 Update the finish method for chaining the other related batches   
+**/
+global  class ContactLinkerBatch implements Database.Batchable<sObject> {
+    
+    /*
+    * Description: Start method will fetch all the contact records where other email fields are blank 
+    * Input: Batchable Contex
+    * Output: 
+    */
+
+    global Database.QueryLocator start(Database.BatchableContext BC) {
+
+        // If test is running 10 records else process 50000000 records
+        //Integer maxRows = Test.isRunningTest() ? 10 : 50000000;
+        Integer maxRows = 50000000;
+        
+        return Database.getQueryLocator([SELECT Id, Name, Email, Alternate_Email__c,
+                                                Personal_Email__c, Work_Email__c
+                                         FROM   Contact 
+                                         WHERE  isEmailNotBlank__c = true 
+                                         AND    isChild__c = true 
+                                         limit  :maxRows]);
+    }
+
+    /*
+    * Description: Execute method will pass the child contact records list to handler metod
+    * Input: Batchable Contex and List of Contact
+    * Output: 
+    */
+
+    global void execute(Database.BatchableContext BC, List<Contact> scope) {
+        
+        List<Contact> childContactList = new List<Contact>();
+        Set<String> emailIdSet = new Set<String>(); 
+        
+        for(Contact contInstance : scope) {
+            Contact conObj = (Contact)contInstance;
+            emailIdSet.add(contInstance.Email);
+            childContactList.add(conObj); 
+        }
+        ContactLinkerBatchHandler.parentChildLinker(childContactList, emailIdSet);
+    }
+    
+    /*
+    * Description: Execute the other related batches depending upon the status is holding, queued or processing
+    * Input: Batchable Contex
+    * Output: 
+    */
+    global void finish(Database.BatchableContext BC) {
+      /*  List<Contact> newContact = [select id, RecordTypeId, Email, Alternate_Email__c, Personal_Email__c, Work_Email__c,isChild__c, Parent_Contact__c from Contact];
+        for(Contact conInstance : newContact){
+        	System.debug('In finish all contacts =========='+conInstance);
+            
+        }*/
+        reparentingBatchCall();
+       
+    }
+    
+    /*
+    * Description: This method will execute all batches one by one
+    * Input: 
+    * Output: 
+    */
+    global void reparentingBatchCall(){
+         Set<String> setOfBatchName = new Set<String>{'ReparentingOtherAddressesBtach','ReparentingRecurringGiftsBtach',
+                                                'ReparentingSolicitorBtach', 'ReparentingTransactionBtach',
+                                                'ReparentingOpportunityBatch'};
+     
+        List<AsyncApexJob> lstAsynJob = [SELECT Id,ApexClass.Name 
+                                        FROM AsyncApexJob WHERE ApexClass.Name IN :setOfBatchName 
+                                        AND (Status = 'Holding' OR Status = 'Queued' OR Status = 'Processing' )];
+        
+        Set<String> setOfJobsInProgress =   new Set<String>(); 
+         
+        for(AsyncApexJob objAysnJob :lstAsynJob){
+            setOfJobsInProgress.add(objAysnJob.ApexClass.Name);
+        }
+      
+        if(!setOfJobsInProgress.contains('ReparentingOtherAddressesBatch')) {
+             ReparentingOtherAddresses();
+        }
+
+        if(!setOfJobsInProgress.contains('ReparentingRecurringGiftsBatch')) {
+            ReparentingRecurringGifts();
+        }
+
+        if(!setOfJobsInProgress.contains('ReparentingTransactionBatch')) { 
+            if (!Test.isRunningTest()) {
+                ReparentingTransaction();
+            }
+        }
+
+        if(!setOfJobsInProgress.contains('ReparentingSolicitorBatch')) {
+           if (!Test.isRunningTest()) {
+               ReparentingSolicitor();
+           }   
+        }
+           
+        if(!setOfJobsInProgress.contains('ReparentingAffiliationBatch')) {
+            ReparentingAffiliation();
+        }
+        
+        if(!setOfJobsInProgress.contains('ReparentingOpportunityBatch')) {
+            ReparentingOpportunity();
+        }
+    }
+    
+    global void ReparentingOtherAddresses(){
+    
+        Database.executeBatch(new ReparentingOtherAddressesBatch()); 
+    }
+    
+     global void ReparentingRecurringGifts(){
+    
+        Database.executeBatch(new ReparentingRecurringGiftsBatch());
+    }
+    
+    global void ReparentingSolicitor(){
+    
+        Database.executeBatch(new ReparentingSolicitorBatch()); 
+    }
+    
+    global void ReparentingTransaction(){
+    
+         Database.executeBatch(new ReparentingTransactionBatch()); 
+    }
+    global void ReparentingAffiliation(){
+    
+         Database.executeBatch(new ReparentingAffiliationBatch()); 
+    }
+    
+    global void ReparentingOpportunity() {
+        Database.executeBatch(new ReparentingOpportunityBatch()); 
+    }
+}
